@@ -26,7 +26,7 @@ resource law 'Microsoft.OperationalInsights/workspaces@2022-10-01' = if (enableM
   location: resourceGroup().location
   properties: {
     // Retention in days (minimum allowed is 5)
-    retentionInDays: 5
+    retentionInDays: 30
   }
 }
 
