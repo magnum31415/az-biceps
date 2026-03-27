@@ -218,7 +218,8 @@ run_dry() {
   az deployment group what-if \
     --resource-group "$RESOURCE_GROUP" \
     --template-file "$BICEP_FILE" \
-    --parameters "$PARAM_ARG"
+    --parameters "$PARAM_ARG" \
+    --parameters kvAdminsGroupId="$GROUP_ID"
 }
 
 # -----------------------------
@@ -232,7 +233,8 @@ run_apply() {
   az deployment group create \
     --resource-group "$RESOURCE_GROUP" \
     --template-file "$BICEP_FILE" \
-    --parameters "$PARAM_ARG"
+    --parameters "$PARAM_ARG" \
+    --parameters kvAdminsGroupId="$GROUP_ID"
 }
 
 run_destroy() {
@@ -266,6 +268,23 @@ run_destroy() {
 }
 
 # -----------------------------
+# Ensure Entra ID Group exists
+# -----------------------------
+ensure_group() {
+  log_info "Ensuring Entra ID group exists..."
+
+  GROUP_ID=$(az ad group show \
+    --group "BI-azKeyVault-Officer" \
+    --query id -o tsv 2>/dev/null || \
+  az ad group create \
+    --display-name "BI-azKeyVault-Officer" \
+    --mail-nickname "bi-azkeyvault-officer" \
+    --query id -o tsv)
+
+  log_info "Group ID: $GROUP_ID"
+}
+
+# -----------------------------
 # Main
 # -----------------------------
 main() {
@@ -281,10 +300,12 @@ main() {
       ;;
     dry-run)
       ensure_rg
+      ensure_group
       run_dry
       ;;
     apply)
       ensure_rg
+      ensure_group
       run_apply
       ;;
   esac

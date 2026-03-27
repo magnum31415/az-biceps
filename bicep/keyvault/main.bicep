@@ -17,7 +17,7 @@ module keyvault 'modules/keyvault.bicep' = {
   }
 }
 
-/*
+
 module rbac 'modules/rbac.bicep' = {
   name: 'assignRBAC'
   dependsOn: [ keyvault ]
@@ -27,6 +27,8 @@ module rbac 'modules/rbac.bicep' = {
   }
 }
 
+
+
 module alerts 'modules/alerts.bicep' = {
   name: 'deployAlerts'
   dependsOn: [ keyvault ]
@@ -35,6 +37,7 @@ module alerts 'modules/alerts.bicep' = {
     email: alertEmail
   }
 }
+/*
 
 module monitoring 'modules/monitoring.bicep' = {
   name: 'deployMonitoring'
