@@ -1,0 +1,13 @@
+using '../main.bicep'
+
+param kvName = 'kv-test-ricard-001'
+param location = 'westeurope'
+
+param resourceGroupName = 'rg-test-ricard-dev'
+
+
+param tenantId = '####-###-####-#######'
+param kvAdminsGroupId = 'azKeyVaut-group'
+param alertEmail = 'yourmail@gmail.com'
+
+param softDeleteRetentionDays = 7
