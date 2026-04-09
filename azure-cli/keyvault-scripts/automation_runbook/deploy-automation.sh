@@ -13,6 +13,24 @@ MODE=""
 AUTO_APPROVE=false
 
 # ================================
+# Create vars for runbook
+# ================================
+create_var () {
+  NAME=$1
+  VALUE=$2
+
+  az resource create \
+    --resource-group $RESOURCE_GROUP \
+    --resource-type "Microsoft.Automation/automationAccounts/variables" \
+    --name "$AUTOMATION_ACCOUNT/$NAME" \
+    --properties "{\"value\":\"$VALUE\"}" \
+    >/dev/null 2>&1 || echo "ℹ️ Variable $NAME already exists"
+}
+
+
+
+
+# ================================
 # PARSE ARGS
 # ================================
 for arg in "$@"; do
@@ -134,6 +152,51 @@ if [[ -z "$MI_PRINCIPAL_ID" || "$MI_PRINCIPAL_ID" == "null" ]]; then
   exit 1
 fi
 
+# ================================
+# RBAC ASSIGNMENTS
+# ================================
+
+echo "🔹 Assigning RBAC roles..."
+
+KV_SCOPE="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RESOURCE_GROUP/providers/Microsoft.KeyVault/vaults/$KEYVAULT_NAME"
+ST_SCOPE="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$STORAGE_RG/providers/Microsoft.Storage/storageAccounts/$STORAGE_ACCOUNT"
+
+# -------- Key Vault --------
+echo "🔹 Key Vault role..."
+
+for i in {1..5}; do
+  az role assignment create \
+    --assignee $MI_PRINCIPAL_ID \
+    --role "Key Vault Administrator" \
+    --scope $KV_SCOPE \
+    >/dev/null 2>&1 && break
+
+  echo "⏳ Retry KV role assignment ($i/5)..."
+  sleep 10
+done
+
+# -------- Storage --------
+echo "🔹 Storage role..."
+
+for i in {1..5}; do
+  az role assignment create \
+    --assignee $MI_PRINCIPAL_ID \
+    --role "Storage Blob Data Contributor" \
+    --scope $ST_SCOPE \
+    >/dev/null 2>&1 && break
+
+  echo "⏳ Retry Storage role assignment ($i/5)..."
+  sleep 10
+done
+
+# ----- Verify Roles ----
+echo "🔍 Verifying RBAC..."
+
+az role assignment list \
+  --assignee $MI_PRINCIPAL_ID \
+  --query "[].roleDefinitionName" -o table
+
+
   MI_PRINCIPAL_ID=$(az automation account show \
     --name $AUTOMATION_ACCOUNT \
     --resource-group $RESOURCE_GROUP \
@@ -176,13 +239,29 @@ fi
     --resource-group $RESOURCE_GROUP \
     --name $RUNBOOK_NAME
 
+  echo "🔹 Creating Vars for runbook..."
+create_var "kvName" "$KEYVAULT_NAME"
+create_var "storageAccount" "$STORAGE_ACCOUNT"
+create_var "containerName" "$CONTAINER_NAME"
+create_var "subscriptionId" "$SUBSCRIPTION_ID"
+
+
+az resource list \
+  --resource-group $RESOURCE_GROUP \
+  --resource-type "Microsoft.Automation/automationAccounts/variables" \
+  -o table
+
   echo "🔹 Creating Schedule..."
+
+  START_TIME=$(date -u -d "+5 minutes" +"%Y-%m-%dT%H:%M:%SZ")
+
   az automation schedule create \
     --automation-account-name $AUTOMATION_ACCOUNT \
     --resource-group $RESOURCE_GROUP \
     --name $SCHEDULE_NAME \
     --frequency Week \
     --interval 1 \
+    --start-time $START_TIME \
     >/dev/null 2>&1 || echo "ℹ️ Schedule already exists"
 
   echo "🔹 Linking Runbook + Schedule..."
