@@ -35,13 +35,14 @@ parse_args() {
     case $arg in
       --apply) MODE="apply" ;;
       --destroy) MODE="destroy" ;;
+      --dry-run) MODE="dry-run" ;;
       --yes) AUTO_APPROVE=true ;;
       *) echo "❌ Unknown argument: $arg"; exit 1 ;;
     esac
   done
 
   if [[ -z "$MODE" ]]; then
-    echo "❌ You must specify --apply or --destroy"
+    echo "❌ You must specify --apply, --destroy or --dry-run"
     exit 1
   fi
 }
@@ -78,6 +79,11 @@ print_summary() {
 # CONFIRM
 # ================================
 confirm() {
+  if [[ "$MODE" == "dry-run" ]]; then
+    echo "ℹ️ Dry-run mode → no changes will be applied"
+    return
+  fi
+
   if [ "$AUTO_APPROVE" = false ]; then
     read -p "Do you want to continue? (y/N): " confirm
     [[ "$confirm" != "y" && "$confirm" != "Y" ]] && exit 0
@@ -92,7 +98,19 @@ set_subscription() {
 }
 
 # ================================
-# CREATE AUTOMATION ACCOUNT
+# VERIFY HELPERS
+# ================================
+get_mi_if_exists() {
+  MI_PRINCIPAL_ID=$(az automation account show \
+    --name $AUTOMATION_ACCOUNT \
+    --resource-group $RESOURCE_GROUP \
+    --query identity.principalId -o tsv 2>/dev/null || echo "")
+
+  [[ "$MI_PRINCIPAL_ID" == "null" ]] && MI_PRINCIPAL_ID=""
+}
+
+# ================================
+# CREATE / VERIFY
 # ================================
 create_automation() {
   echo "🔹 Creating Automation Account..."
@@ -105,16 +123,12 @@ create_automation() {
 
 verify_automation() {
   echo "🔍 Verifying Automation Account..."
-
   az automation account show \
     --name $AUTOMATION_ACCOUNT \
     --resource-group $RESOURCE_GROUP \
-    -o table
+    -o table || echo "⚠️ Not found"
 }
 
-# ================================
-# ENABLE MI
-# ================================
 enable_mi() {
   echo "🔹 Enabling Managed Identity..."
 
@@ -122,43 +136,40 @@ enable_mi() {
 
   az resource update \
     --ids $RESOURCE_ID \
-    --set identity.type=SystemAssigned \
-    >/dev/null
+    --set identity.type=SystemAssigned >/dev/null
 
   echo "🔍 Waiting for MI..."
 
   for i in {1..10}; do
-    MI_PRINCIPAL_ID=$(az automation account show \
-      --name $AUTOMATION_ACCOUNT \
-      --resource-group $RESOURCE_GROUP \
-      --query identity.principalId -o tsv)
-
-    [[ -n "$MI_PRINCIPAL_ID" && "$MI_PRINCIPAL_ID" != "null" ]] && break
-
-    echo "⏳ Waiting ($i/10)..."
+    get_mi_if_exists
+    [[ -n "$MI_PRINCIPAL_ID" ]] && break
     sleep 5
   done
 
-  [[ -z "$MI_PRINCIPAL_ID" || "$MI_PRINCIPAL_ID" == "null" ]] && {
-    echo "❌ MI failed"
-    exit 1
-  }
+  [[ -z "$MI_PRINCIPAL_ID" ]] && { echo "❌ MI failed"; exit 1; }
 
   echo "✅ MI: $MI_PRINCIPAL_ID"
 }
 
 verify_mi() {
   echo "🔍 Verifying Managed Identity..."
-
   az automation account show \
     --name $AUTOMATION_ACCOUNT \
     --resource-group $RESOURCE_GROUP \
-    --query identity -o json
+    --query identity -o json || echo "⚠️ MI not found"
 }
 
-# ================================
-# RBAC
-# ================================
+get_mi_if_exists() {
+  set +e
+  MI_PRINCIPAL_ID=$(az automation account show \
+    --name $AUTOMATION_ACCOUNT \
+    --resource-group $RESOURCE_GROUP \
+    --query identity.principalId -o tsv 2>/dev/null)
+  set -e
+
+  [[ "$MI_PRINCIPAL_ID" == "null" ]] && MI_PRINCIPAL_ID=""
+}
+
 assign_rbac() {
   echo "🔹 Assigning RBAC..."
 
@@ -180,25 +191,23 @@ assign_rbac() {
       --scope $ST_SCOPE >/dev/null 2>&1 && break
     sleep 10
   done
-
-  echo "🔍 Verifying RBAC..."
-  az role assignment list \
-    --assignee $MI_PRINCIPAL_ID \
-    --query "[].roleDefinitionName" -o table
 }
 
 verify_rbac() {
   echo "🔍 Verifying RBAC..."
+  [[ -z "$MI_PRINCIPAL_ID" ]] && get_mi_if_exists
+
+  [[ -z "$MI_PRINCIPAL_ID" ]] && {
+    echo "⚠️ MI not found → cannot verify RBAC"
+    return
+  }
 
   az role assignment list \
     --assignee $MI_PRINCIPAL_ID \
     --query "[].{Role:roleDefinitionName, Scope:scope}" \
-    -o table
+    -o table || echo "⚠️ No RBAC yet"
 }
 
-# ================================
-# RUNBOOK
-# ================================
 deploy_runbook() {
   echo "🔹 Deploying Runbook..."
 
@@ -222,19 +231,14 @@ deploy_runbook() {
 
 verify_runbook() {
   echo "🔍 Verifying Runbook..."
-
   az automation runbook list \
     --automation-account-name $AUTOMATION_ACCOUNT \
     --resource-group $RESOURCE_GROUP \
-    -o table
+    -o table || echo "⚠️ No runbooks"
 }
 
-# ================================
-# VARIABLES
-# ================================
 create_variables() {
   echo "🔹 Creating variables..."
-
   create_var "kvName" "$KEYVAULT_NAME"
   create_var "storageAccount" "$STORAGE_ACCOUNT"
   create_var "containerName" "$CONTAINER_NAME"
@@ -243,17 +247,13 @@ create_variables() {
 
 verify_variables() {
   echo "🔍 Verifying Variables..."
-
   az resource list \
     --resource-group $RESOURCE_GROUP \
     --resource-type "Microsoft.Automation/automationAccounts/variables" \
     --query "[].name" \
-    -o table
+    -o table || echo "⚠️ No variables"
 }
 
-# ================================
-# SCHEDULE
-# ================================
 create_schedule() {
   echo "🔹 Creating schedule..."
 
@@ -276,16 +276,12 @@ create_schedule() {
 
 verify_schedule() {
   echo "🔍 Verifying Schedule..."
-
   az automation schedule list \
     --automation-account-name $AUTOMATION_ACCOUNT \
     --resource-group $RESOURCE_GROUP \
-    -o table
+    -o table || echo "⚠️ No schedules"
 }
 
-# ================================
-# DESTROY
-# ================================
 destroy() {
   echo "🔹 Deleting Automation Account..."
   az automation account delete \
@@ -314,6 +310,30 @@ main() {
   confirm
   set_subscription
 
+  # 🔹 DRY RUN → SOLO VERIFY
+  if [[ "$MODE" == "dry-run" ]]; then
+    step "Automation Account"
+    verify_automation
+
+    step "Managed Identity"
+    verify_mi
+
+    step "RBAC"
+    verify_rbac
+
+    step "Runbook"
+    verify_runbook
+
+    step "Variables"
+    verify_variables
+
+    step "Schedule"
+    verify_schedule
+
+    echo "✅ Dry-run completed"
+    return
+  fi
+
   if [[ "$MODE" == "apply" ]]; then
     step "Automation Account"
     create_automation
@@ -325,6 +345,7 @@ main() {
 
     step "RBAC Assignments"
     assign_rbac
+    get_mi_if_exists
     verify_rbac || echo "⚠️ RBAC not fully propagated yet"
 
     step "Runbook Deployment"
@@ -338,6 +359,7 @@ main() {
     step "Schedule"
     create_schedule
     verify_schedule
+
     echo "✅ Deployment completed"
   fi
 
