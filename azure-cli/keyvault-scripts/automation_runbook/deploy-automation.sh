@@ -19,12 +19,26 @@ create_var () {
   NAME=$1
   VALUE=$2
 
-  az resource create \
-    --resource-group $RESOURCE_GROUP \
-    --resource-type "Microsoft.Automation/automationAccounts/variables" \
-    --name "$AUTOMATION_ACCOUNT/$NAME" \
-    --properties "{\"value\":\"$VALUE\"}" \
-    >/dev/null 2>&1 || echo "ℹ️ Variable $NAME already exists"
+  echo "🔹 Creating/updating variable: $NAME"
+
+  BODY=$(cat <<EOF
+{
+  "name": "$NAME",
+  "properties": {
+    "value": "\"$VALUE\"",
+    "isEncrypted": false
+  }
+}
+EOF
+)
+
+  az rest --method PUT \
+    --uri "https://management.azure.com/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RESOURCE_GROUP/providers/Microsoft.Automation/automationAccounts/$AUTOMATION_ACCOUNT/variables/$NAME?api-version=2023-11-01" \
+    --headers "Content-Type=application/json" \
+    --body "$BODY" \
+    >/dev/null
+
+  echo "✅ Variable $NAME configured"
 }
 
 # ================================
@@ -86,7 +100,10 @@ confirm() {
 
   if [ "$AUTO_APPROVE" = false ]; then
     read -p "Do you want to continue? (y/N): " confirm
-    [[ "$confirm" != "y" && "$confirm" != "Y" ]] && exit 0
+    if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
+      echo "❌ Cancelled"
+      exit 0
+    fi
   fi
 }
 
@@ -167,7 +184,12 @@ get_mi_if_exists() {
     --query identity.principalId -o tsv 2>/dev/null)
   set -e
 
-  [[ "$MI_PRINCIPAL_ID" == "null" ]] && MI_PRINCIPAL_ID=""
+  if [[ "$MI_PRINCIPAL_ID" == "null" ]]; then
+    MI_PRINCIPAL_ID=""
+  fi
+
+  return 0
+
 }
 
 assign_rbac() {
@@ -204,6 +226,7 @@ verify_rbac() {
 
   az role assignment list \
     --assignee $MI_PRINCIPAL_ID \
+    --all \
     --query "[].{Role:roleDefinitionName, Scope:scope}" \
     -o table || echo "⚠️ No RBAC yet"
 }
@@ -247,12 +270,13 @@ create_variables() {
 
 verify_variables() {
   echo "🔍 Verifying Variables..."
-  az resource list \
-    --resource-group $RESOURCE_GROUP \
-    --resource-type "Microsoft.Automation/automationAccounts/variables" \
-    --query "[].name" \
-    -o table || echo "⚠️ No variables"
+
+  az rest --method GET \
+    --uri "https://management.azure.com/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RESOURCE_GROUP/providers/Microsoft.Automation/automationAccounts/$AUTOMATION_ACCOUNT/variables?api-version=2023-11-01" \
+    --query "value[].{Name:name, Value:properties.value}" \
+    -o table
 }
+
 
 create_schedule() {
   echo "🔹 Creating schedule..."
