@@ -153,7 +153,56 @@ ST --> BC
 
 - Dry-run mode for validation
 
----
+### Backup
+Azure Storage provides a modern, policy-driven approach to data protection, where traditional backups are replaced by native platform capabilities that ensure durability, recoverability, and cost efficiency.
+
+In modern Azure architectures, traditional "backup" approaches are no longer the primary mechanism for data protection. Instead, Azure provides built-in capabilities within Storage Accounts that collectively replace classical backup solutions.
+
+Storage tiers such as **Cool** and **Archive** are used to optimize cost, making them suitable for backup and long-term retention scenarios.
+
+
+
+#### Modern Backup Approach
+
+The concept of backup in Azure is implemented through a combination of the following features:
+
+- **Versioning**  
+  Maintains previous versions of objects, enabling recovery from accidental changes or deletions.
+
+- **Soft Delete**  
+  Retains deleted data for a defined period, allowing restoration without permanent data loss.
+
+- **Immutability**  
+  Protects data from modification or deletion for a specified retention period (WORM – Write Once Read Many).
+
+- **Replication**  
+  Ensures data durability and availability across zones or regions.
+
+- **Lifecycle Management**  
+  Automatically moves or deletes data based on defined policies to optimize cost.
+
+
+
+#### Recommended Configuration
+
+For a robust backup strategy, the following settings are recommended:
+
+- ✔️ **Versioning** → Enabled  
+- ✔️ **Soft Delete** → 30–90 days  
+- ✔️ **Immutability** → Minimum 30 days  
+- ✔️ **Lifecycle Policies** → Enabled (automatic cleanup and tiering)  
+- ✔️ **Replication** → ZRS or GRS (depending on criticality)
+
+
+#### Scope of Configuration
+
+All these features are configured at the **Storage Account level**, not at the container level.
+
+````
+Storage Account
+├── Global configuration (versioning, soft delete, replication, etc.)
+└── Containers (data only)
+````
 
 ## 7. Configuration Management
 
