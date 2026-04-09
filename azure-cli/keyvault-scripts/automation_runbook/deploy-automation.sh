@@ -13,7 +13,7 @@ MODE=""
 AUTO_APPROVE=false
 
 # ================================
-# Create vars for runbook
+# UTILS
 # ================================
 create_var () {
   NAME=$1
@@ -27,231 +27,235 @@ create_var () {
     >/dev/null 2>&1 || echo "ℹ️ Variable $NAME already exists"
 }
 
-
-
-
 # ================================
 # PARSE ARGS
 # ================================
-for arg in "$@"; do
-  case $arg in
-    --apply)
-      MODE="apply"
-      ;;
-    --destroy)
-      MODE="destroy"
-      ;;
-    --yes)
-      AUTO_APPROVE=true
-      ;;
-    *)
-      echo "❌ Unknown argument: $arg"
-      exit 1
-      ;;
-  esac
-done
+parse_args() {
+  for arg in "$@"; do
+    case $arg in
+      --apply) MODE="apply" ;;
+      --destroy) MODE="destroy" ;;
+      --yes) AUTO_APPROVE=true ;;
+      *) echo "❌ Unknown argument: $arg"; exit 1 ;;
+    esac
+  done
 
-if [[ -z "$MODE" ]]; then
-  echo "❌ You must specify --apply or --destroy"
-  exit 1
-fi
+  if [[ -z "$MODE" ]]; then
+    echo "❌ You must specify --apply or --destroy"
+    exit 1
+  fi
+}
 
 # ================================
 # VALIDATIONS
 # ================================
-if [[ "$MODE" == "apply" ]]; then
-  if [[ ! -f "./runbook.ps1" ]]; then
-    echo "❌ runbook.ps1 not found in current directory"
+validate() {
+  if [[ "$MODE" == "apply" && ! -f "./runbook.ps1" ]]; then
+    echo "❌ runbook.ps1 not found"
     exit 1
   fi
-fi
+}
 
 # ================================
 # SUMMARY
 # ================================
-echo "=========================================="
-echo "🚀 Automation Deployment Plan"
-echo "=========================================="
-echo "Mode:                $MODE"
-echo "Subscription:        $SUBSCRIPTION_ID"
-echo "Resource Group:      $RESOURCE_GROUP"
-echo "Location:            $LOCATION"
-echo "Automation Account:  $AUTOMATION_ACCOUNT"
-echo "Runbook:             $RUNBOOK_NAME"
-echo "Schedule:            $SCHEDULE_NAME"
-echo "Key Vault:           $KEYVAULT_NAME"
-echo "Storage Account:     $STORAGE_ACCOUNT"
-echo "Container:           $CONTAINER_NAME"
-echo "Runbook file:        runbook.ps1"
-echo "=========================================="
+print_summary() {
+  echo "=========================================="
+  echo "🚀 Automation Deployment Plan"
+  echo "=========================================="
+  echo "Mode:                $MODE"
+  echo "Subscription:        $SUBSCRIPTION_ID"
+  echo "Resource Group:      $RESOURCE_GROUP"
+  echo "Automation Account:  $AUTOMATION_ACCOUNT"
+  echo "Runbook:             $RUNBOOK_NAME"
+  echo "Schedule:            $SCHEDULE_NAME"
+  echo "Key Vault:           $KEYVAULT_NAME"
+  echo "Storage Account:     $STORAGE_ACCOUNT"
+  echo "=========================================="
+}
 
 # ================================
-# CONFIRMATION
+# CONFIRM
 # ================================
-if [ "$AUTO_APPROVE" = false ]; then
-  read -p "Do you want to continue? (y/N): " confirm
-  if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
-    echo "❌ Aborted"
-    exit 0
+confirm() {
+  if [ "$AUTO_APPROVE" = false ]; then
+    read -p "Do you want to continue? (y/N): " confirm
+    [[ "$confirm" != "y" && "$confirm" != "Y" ]] && exit 0
   fi
-fi
+}
 
 # ================================
-# SET SUBSCRIPTION
+# SET SUB
 # ================================
-az account set --subscription $SUBSCRIPTION_ID
+set_subscription() {
+  az account set --subscription $SUBSCRIPTION_ID
+}
 
 # ================================
-# APPLY
+# CREATE AUTOMATION ACCOUNT
 # ================================
-if [[ "$MODE" == "apply" ]]; then
-
+create_automation() {
   echo "🔹 Creating Automation Account..."
   az automation account create \
     --name $AUTOMATION_ACCOUNT \
     --resource-group $RESOURCE_GROUP \
     --location $LOCATION \
-    >/dev/null 2>&1 || echo "ℹ️ Automation Account already exists"
+    >/dev/null 2>&1 || echo "ℹ️ Already exists"
+}
 
+verify_automation() {
+  echo "🔍 Verifying Automation Account..."
 
-echo "🔹 Enabling Managed Identity..."
-
-RESOURCE_ID="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RESOURCE_GROUP/providers/Microsoft.Automation/automationAccounts/$AUTOMATION_ACCOUNT"
-
-# Enable MI via ARM (siempre funciona)
-az resource update \
-  --ids $RESOURCE_ID \
-  --set identity.type=SystemAssigned \
-  >/dev/null
-
-# ================================
-# VERIFY (loop hasta que exista)
-# ================================
-echo "🔍 Waiting for Managed Identity to be available..."
-
-for i in {1..10}; do
-  MI_PRINCIPAL_ID=$(az automation account show \
+  az automation account show \
     --name $AUTOMATION_ACCOUNT \
     --resource-group $RESOURCE_GROUP \
-    --query identity.principalId -o tsv)
-
-  if [[ -n "$MI_PRINCIPAL_ID" && "$MI_PRINCIPAL_ID" != "null" ]]; then
-    echo "✅ Managed Identity enabled: $MI_PRINCIPAL_ID"
-    break
-  fi
-
-  echo "⏳ Waiting... ($i/10)"
-  sleep 5
-done
+    -o table
+}
 
 # ================================
-# FAIL SI NO HAY MI
+# ENABLE MI
 # ================================
-if [[ -z "$MI_PRINCIPAL_ID" || "$MI_PRINCIPAL_ID" == "null" ]]; then
-  echo "❌ Failed to enable Managed Identity"
-  exit 1
-fi
+enable_mi() {
+  echo "🔹 Enabling Managed Identity..."
 
-# ================================
-# RBAC ASSIGNMENTS
-# ================================
+  RESOURCE_ID="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RESOURCE_GROUP/providers/Microsoft.Automation/automationAccounts/$AUTOMATION_ACCOUNT"
 
-echo "🔹 Assigning RBAC roles..."
+  az resource update \
+    --ids $RESOURCE_ID \
+    --set identity.type=SystemAssigned \
+    >/dev/null
 
-KV_SCOPE="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RESOURCE_GROUP/providers/Microsoft.KeyVault/vaults/$KEYVAULT_NAME"
-ST_SCOPE="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$STORAGE_RG/providers/Microsoft.Storage/storageAccounts/$STORAGE_ACCOUNT"
+  echo "🔍 Waiting for MI..."
 
-# -------- Key Vault --------
-echo "🔹 Key Vault role..."
+  for i in {1..10}; do
+    MI_PRINCIPAL_ID=$(az automation account show \
+      --name $AUTOMATION_ACCOUNT \
+      --resource-group $RESOURCE_GROUP \
+      --query identity.principalId -o tsv)
 
-for i in {1..5}; do
-  az role assignment create \
-    --assignee $MI_PRINCIPAL_ID \
-    --role "Key Vault Administrator" \
-    --scope $KV_SCOPE \
-    >/dev/null 2>&1 && break
+    [[ -n "$MI_PRINCIPAL_ID" && "$MI_PRINCIPAL_ID" != "null" ]] && break
 
-  echo "⏳ Retry KV role assignment ($i/5)..."
-  sleep 10
-done
+    echo "⏳ Waiting ($i/10)..."
+    sleep 5
+  done
 
-# -------- Storage --------
-echo "🔹 Storage role..."
+  [[ -z "$MI_PRINCIPAL_ID" || "$MI_PRINCIPAL_ID" == "null" ]] && {
+    echo "❌ MI failed"
+    exit 1
+  }
 
-for i in {1..5}; do
-  az role assignment create \
-    --assignee $MI_PRINCIPAL_ID \
-    --role "Storage Blob Data Contributor" \
-    --scope $ST_SCOPE \
-    >/dev/null 2>&1 && break
+  echo "✅ MI: $MI_PRINCIPAL_ID"
+}
 
-  echo "⏳ Retry Storage role assignment ($i/5)..."
-  sleep 10
-done
+verify_mi() {
+  echo "🔍 Verifying Managed Identity..."
 
-# ----- Verify Roles ----
-echo "🔍 Verifying RBAC..."
-
-az role assignment list \
-  --assignee $MI_PRINCIPAL_ID \
-  --query "[].roleDefinitionName" -o table
-
-
-  MI_PRINCIPAL_ID=$(az automation account show \
+  az automation account show \
     --name $AUTOMATION_ACCOUNT \
     --resource-group $RESOURCE_GROUP \
-    --query identity.principalId -o tsv)
+    --query identity -o json
+}
 
-  echo "🔹 Managed Identity Principal ID: $MI_PRINCIPAL_ID"
+# ================================
+# RBAC
+# ================================
+assign_rbac() {
+  echo "🔹 Assigning RBAC..."
 
-  echo "🔹 Assigning Key Vault permissions..."
-  az role assignment create \
+  KV_SCOPE="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RESOURCE_GROUP/providers/Microsoft.KeyVault/vaults/$KEYVAULT_NAME"
+  ST_SCOPE="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$STORAGE_RG/providers/Microsoft.Storage/storageAccounts/$STORAGE_ACCOUNT"
+
+  for i in {1..5}; do
+    az role assignment create \
+      --assignee $MI_PRINCIPAL_ID \
+      --role "Key Vault Administrator" \
+      --scope $KV_SCOPE >/dev/null 2>&1 && break
+    sleep 10
+  done
+
+  for i in {1..5}; do
+    az role assignment create \
+      --assignee $MI_PRINCIPAL_ID \
+      --role "Storage Blob Data Contributor" \
+      --scope $ST_SCOPE >/dev/null 2>&1 && break
+    sleep 10
+  done
+
+  echo "🔍 Verifying RBAC..."
+  az role assignment list \
     --assignee $MI_PRINCIPAL_ID \
-    --role "Key Vault Administrator" \
-    --scope /subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RESOURCE_GROUP/providers/Microsoft.KeyVault/vaults/$KEYVAULT_NAME \
-    >/dev/null 2>&1 || echo "ℹ️ KV role already assigned"
+    --query "[].roleDefinitionName" -o table
+}
 
-  echo "🔹 Assigning Storage permissions..."
-  az role assignment create \
+verify_rbac() {
+  echo "🔍 Verifying RBAC..."
+
+  az role assignment list \
     --assignee $MI_PRINCIPAL_ID \
-    --role "Storage Blob Data Contributor" \
-    --scope /subscriptions/$SUBSCRIPTION_ID/resourceGroups/$STORAGE_RG/providers/Microsoft.Storage/storageAccounts/$STORAGE_ACCOUNT \
-    >/dev/null 2>&1 || echo "ℹ️ Storage role already assigned"
+    --query "[].{Role:roleDefinitionName, Scope:scope}" \
+    -o table
+}
 
-  echo "🔹 Creating Runbook..."
+# ================================
+# RUNBOOK
+# ================================
+deploy_runbook() {
+  echo "🔹 Deploying Runbook..."
+
   az automation runbook create \
     --automation-account-name $AUTOMATION_ACCOUNT \
     --resource-group $RESOURCE_GROUP \
     --name $RUNBOOK_NAME \
-    --type PowerShell \
-    >/dev/null 2>&1 || echo "ℹ️ Runbook already exists"
+    --type PowerShell >/dev/null 2>&1 || true
 
-  echo "🔹 Uploading Runbook content..."
   az automation runbook replace-content \
     --automation-account-name $AUTOMATION_ACCOUNT \
     --resource-group $RESOURCE_GROUP \
     --name $RUNBOOK_NAME \
     --content @runbook.ps1
 
-  echo "🔹 Publishing Runbook..."
   az automation runbook publish \
     --automation-account-name $AUTOMATION_ACCOUNT \
     --resource-group $RESOURCE_GROUP \
     --name $RUNBOOK_NAME
+}
 
-  echo "🔹 Creating Vars for runbook..."
-create_var "kvName" "$KEYVAULT_NAME"
-create_var "storageAccount" "$STORAGE_ACCOUNT"
-create_var "containerName" "$CONTAINER_NAME"
-create_var "subscriptionId" "$SUBSCRIPTION_ID"
+verify_runbook() {
+  echo "🔍 Verifying Runbook..."
 
+  az automation runbook list \
+    --automation-account-name $AUTOMATION_ACCOUNT \
+    --resource-group $RESOURCE_GROUP \
+    -o table
+}
 
-az resource list \
-  --resource-group $RESOURCE_GROUP \
-  --resource-type "Microsoft.Automation/automationAccounts/variables" \
-  -o table
+# ================================
+# VARIABLES
+# ================================
+create_variables() {
+  echo "🔹 Creating variables..."
 
-  echo "🔹 Creating Schedule..."
+  create_var "kvName" "$KEYVAULT_NAME"
+  create_var "storageAccount" "$STORAGE_ACCOUNT"
+  create_var "containerName" "$CONTAINER_NAME"
+  create_var "subscriptionId" "$SUBSCRIPTION_ID"
+}
+
+verify_variables() {
+  echo "🔍 Verifying Variables..."
+
+  az resource list \
+    --resource-group $RESOURCE_GROUP \
+    --resource-type "Microsoft.Automation/automationAccounts/variables" \
+    --query "[].name" \
+    -o table
+}
+
+# ================================
+# SCHEDULE
+# ================================
+create_schedule() {
+  echo "🔹 Creating schedule..."
 
   START_TIME=$(date -u -d "+5 minutes" +"%Y-%m-%dT%H:%M:%SZ")
 
@@ -261,34 +265,85 @@ az resource list \
     --name $SCHEDULE_NAME \
     --frequency Week \
     --interval 1 \
-    --start-time $START_TIME \
-    >/dev/null 2>&1 || echo "ℹ️ Schedule already exists"
+    --start-time $START_TIME >/dev/null 2>&1 || true
 
-  echo "🔹 Linking Runbook + Schedule..."
   az automation job schedule create \
     --automation-account-name $AUTOMATION_ACCOUNT \
     --resource-group $RESOURCE_GROUP \
     --runbook-name $RUNBOOK_NAME \
-    --schedule-name $SCHEDULE_NAME \
-    >/dev/null 2>&1 || echo "ℹ️ Already linked"
+    --schedule-name $SCHEDULE_NAME >/dev/null 2>&1 || true
+}
 
-  echo "✅ Deployment completed successfully"
+verify_schedule() {
+  echo "🔍 Verifying Schedule..."
 
-fi
+  az automation schedule list \
+    --automation-account-name $AUTOMATION_ACCOUNT \
+    --resource-group $RESOURCE_GROUP \
+    -o table
+}
 
 # ================================
 # DESTROY
 # ================================
-if [[ "$MODE" == "destroy" ]]; then
-
+destroy() {
   echo "🔹 Deleting Automation Account..."
   az automation account delete \
     --name $AUTOMATION_ACCOUNT \
     --resource-group $RESOURCE_GROUP \
     --yes
+}
 
-  echo "⚠️ Note: Role assignments are NOT automatically removed"
+# ================================
+# PRINT HEADER
+# ================================
+step() {
+  echo ""
+  echo "=========================================="
+  echo "👉 $1"
+  echo "=========================================="
+}
 
-  echo "✅ Destroy completed"
+# ================================
+# MAIN
+# ================================
+main() {
+  parse_args "$@"
+  validate
+  print_summary
+  confirm
+  set_subscription
 
-fi
+  if [[ "$MODE" == "apply" ]]; then
+    step "Automation Account"
+    create_automation
+    verify_automation
+
+    step "Managed Identity"
+    enable_mi
+    verify_mi
+
+    step "RBAC Assignments"
+    assign_rbac
+    verify_rbac || echo "⚠️ RBAC not fully propagated yet"
+
+    step "Runbook Deployment"
+    deploy_runbook
+    verify_runbook
+
+    step "Automation Variables"
+    create_variables
+    verify_variables
+
+    step "Schedule"
+    create_schedule
+    verify_schedule
+    echo "✅ Deployment completed"
+  fi
+
+  if [[ "$MODE" == "destroy" ]]; then
+    destroy
+  fi
+}
+
+main "$@"
