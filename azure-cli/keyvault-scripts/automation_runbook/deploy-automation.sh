@@ -281,13 +281,12 @@ verify_variables() {
 create_schedule() {
   echo "🔹 Creating schedule..."
 
-  START_TIME=$(date -u -d "+5 minutes" +"%Y-%m-%dT%H:%M:%SZ")
 
   az automation schedule create \
     --automation-account-name $AUTOMATION_ACCOUNT \
     --resource-group $RESOURCE_GROUP \
     --name $SCHEDULE_NAME \
-    --frequency Week \
+    --frequency $FREQUENCY \
     --interval 1 \
     --start-time $START_TIME >/dev/null 2>&1 || true
 
