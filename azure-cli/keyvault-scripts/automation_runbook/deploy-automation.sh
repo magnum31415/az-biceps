@@ -305,6 +305,15 @@ verify_schedule() {
     -o table || echo "⚠️ No schedules"
 }
 
+verify_job_schedule() {
+  echo "🔍 Verifying Job Schedule (Runbook linkage)..."
+
+  az rest --method GET \
+    --uri "https://management.azure.com/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RESOURCE_GROUP/providers/Microsoft.Automation/automationAccounts/$AUTOMATION_ACCOUNT/jobSchedules?api-version=2023-11-01" \
+    --query "value[].{Runbook:properties.runbook.name, Schedule:properties.schedule.name}" \
+    -o table
+}
+
 destroy() {
   echo "🔹 Deleting Automation Account..."
   az automation account delete \
@@ -351,6 +360,7 @@ main() {
     verify_variables
 
     step "Schedule"
+    verify_job_schedule
     verify_schedule
 
     echo "✅ Dry-run completed"
@@ -381,6 +391,7 @@ main() {
 
     step "Schedule"
     create_schedule
+    verify_job_schedule
     verify_schedule
 
     echo "✅ Deployment completed"
