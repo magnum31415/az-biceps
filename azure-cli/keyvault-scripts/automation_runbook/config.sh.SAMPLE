@@ -1,0 +1,27 @@
+#!/bin/bash
+
+# ================================
+# GLOBAL CONFIG
+# ================================
+SUBSCRIPTION_ID="#####-###-###-###-############"
+RESOURCE_GROUP="rg-test-dev"
+LOCATION="westeurope"
+
+# Automation
+AUTOMATION_ACCOUNT="aa-kv-backup"
+RUNBOOK_NAME="kv-backup-runbook"
+SCHEDULE_NAME="weekly-kv-backup"
+
+# Key Vault
+KEYVAULT_NAME="kv-test-001"
+
+# Storage
+STORAGE_ACCOUNT="############"
+CONTAINER_NAME="blob-container"
+STORAGE_RG="cloud-shell-storage-westeurope"
+
+# Scheduler
+FREQUENCY="Week" 
+START_TIME=$(date -u -d "+5 minutes" +"%Y-%m-%dT%H:%M:%SZ")
+
+
