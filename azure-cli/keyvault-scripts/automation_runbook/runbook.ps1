@@ -1,12 +1,17 @@
-param()
+param(
+    [Parameter(Mandatory=$true)]
+    [string]$kvName,
 
-# ================================
-# CONFIG
-# ================================
-$kvName = Get-AutomationVariable -Name "kvName"
-$storageAccount = Get-AutomationVariable -Name "storageAccount"
-$containerName = Get-AutomationVariable -Name "containerName"
-$subscriptionId = Get-AutomationVariable -Name "subscriptionId"
+    [Parameter(Mandatory=$true)]
+    [string]$storageAccount,
+
+    [Parameter(Mandatory=$true)]
+    [string]$containerName,
+
+    [Parameter(Mandatory=$true)]
+    [string]$subscriptionId
+)
+
 
 # ================================
 # LOGIN (Managed Identity)

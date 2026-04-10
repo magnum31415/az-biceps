@@ -6,6 +6,8 @@ set -e
 # ================================
 source ./config.sh
 
+#RESOURCE_GROUP=$RESOURCE_GROUP_AUTOMATION
+RESOURCE_GROUP="rg-ricard-pro-weu-01"
 # ================================
 # DEFAULTS
 # ================================
@@ -294,7 +296,12 @@ create_schedule() {
     --automation-account-name $AUTOMATION_ACCOUNT \
     --resource-group $RESOURCE_GROUP \
     --runbook-name $RUNBOOK_NAME \
-    --schedule-name $SCHEDULE_NAME >/dev/null 2>&1 || true
+    --schedule-name $SCHEDULE_NAME \
+    --parameters "kvName=$KEYVAULT_NAME" \
+               "storageAccount=$STORAGE_ACCOUNT" \
+               "containerName=$CONTAINER_NAME" \
+               "subscriptionId=$SUBSCRIPTION_ID" >/dev/null 2>&1 || true 
+
 }
 
 verify_schedule() {
