@@ -200,6 +200,14 @@ assign_rbac() {
   KV_SCOPE="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RESOURCE_GROUP/providers/Microsoft.KeyVault/vaults/$KEYVAULT_NAME"
   ST_SCOPE="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$STORAGE_RG/providers/Microsoft.Storage/storageAccounts/$STORAGE_ACCOUNT"
 
+  # Obtener RG del storage automáticamente
+STORAGE_RG=$(az storage account show \
+  --name $STORAGE_ACCOUNT \
+  --query resourceGroup -o tsv)
+
+CONTAINER_SCOPE="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$STORAGE_RG/providers/Microsoft.Storage/storageAccounts/$STORAGE_ACCOUNT/blobServices/default/containers/$CONTAINER_NAME"
+
+
   for i in {1..5}; do
     az role assignment create \
       --assignee $MI_PRINCIPAL_ID \
@@ -208,13 +216,65 @@ assign_rbac() {
     sleep 10
   done
 
+ # for i in {1..5}; do
+ #   az role assignment create \
+ #     --assignee $MI_PRINCIPAL_ID \
+ #     --role "Storage Blob Data Contributor" \
+ #     --scope $ST_SCOPE >/dev/null 2>&1 && break
+ #   sleep 10
+ # done
+
+echo "🔹 Assigning Storage RBAC at container level..."
+
+ROLE_NAME="Storage Blob Data Contributor"
+
+EXISTS=$(az role assignment list \
+  --assignee $MI_PRINCIPAL_ID \
+  --scope $CONTAINER_SCOPE \
+  --query "[?roleDefinitionName=='$ROLE_NAME'] | length(@)" \
+  -o tsv)
+
+if [[ "$EXISTS" -eq 0 ]]; then
+
+  echo "🔹 Role not found → creating..."
+
   for i in {1..5}; do
-    az role assignment create \
-      --assignee $MI_PRINCIPAL_ID \
-      --role "Storage Blob Data Contributor" \
-      --scope $ST_SCOPE >/dev/null 2>&1 && break
+
+    echo "⏳ Attempt $i..."
+
+    if az role assignment create \
+        --assignee $MI_PRINCIPAL_ID \
+        --role "$ROLE_NAME" \
+        --scope $CONTAINER_SCOPE; then
+
+      echo "✅ Role assignment created"
+      break
+    fi
+
+    echo "⚠️ Failed, retrying in 10s..."
     sleep 10
   done
+
+  # 🔍 VALIDACIÓN REAL
+  echo "🔍 Verifying role assignment..."
+
+  EXISTS=$(az role assignment list \
+    --assignee $MI_PRINCIPAL_ID \
+    --scope $CONTAINER_SCOPE \
+    --query "[?roleDefinitionName=='$ROLE_NAME'] | length(@)" \
+    -o tsv)
+
+  if [[ "$EXISTS" -eq 0 ]]; then
+    echo "❌ RBAC assignment failed after retries"
+    exit 1
+  fi
+
+  echo "✅ Storage RBAC assigned (container scope)"
+
+else
+  echo "✅ Storage RBAC already exists (container scope)"
+fi 
+
 }
 
 verify_rbac() {
