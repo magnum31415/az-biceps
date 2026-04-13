@@ -279,29 +279,48 @@ verify_variables() {
     -o table
 }
 
-
 create_schedule() {
   echo "🔹 Creating schedule..."
 
-
   az automation schedule create \
-    --automation-account-name $AUTOMATION_ACCOUNT \
-    --resource-group $RESOURCE_GROUP \
-    --name $SCHEDULE_NAME \
-    --frequency $FREQUENCY \
+    --automation-account-name "$AUTOMATION_ACCOUNT" \
+    --resource-group "$RESOURCE_GROUP" \
+    --name "$SCHEDULE_NAME" \
+    --frequency "$FREQUENCY" \
     --interval 1 \
-    --start-time $START_TIME >/dev/null 2>&1 || true
+    --start-time "$START_TIME"
 
-  az automation job schedule create \
-    --automation-account-name $AUTOMATION_ACCOUNT \
-    --resource-group $RESOURCE_GROUP \
-    --runbook-name $RUNBOOK_NAME \
-    --schedule-name $SCHEDULE_NAME \
-    --parameters "kvName=$KEYVAULT_NAME" \
-               "storageAccount=$STORAGE_ACCOUNT" \
-               "containerName=$CONTAINER_NAME" \
-               "subscriptionId=$SUBSCRIPTION_ID" >/dev/null 2>&1 || true 
+  echo "⏳ Waiting for schedule propagation..."
+  sleep 10
 
+  create_job_schedule_rest
+}
+
+create_job_schedule_rest() {
+  echo "🔹 Creating job schedule link via REST..."
+
+  JOB_SCHEDULE_GUID=$(uuidgen | tr '[:upper:]' '[:lower:]')
+
+  az rest \
+    --method PUT \
+    --uri "https://management.azure.com/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RESOURCE_GROUP/providers/Microsoft.Automation/automationAccounts/$AUTOMATION_ACCOUNT/jobSchedules/$JOB_SCHEDULE_GUID?api-version=2024-10-23" \
+    --headers "Content-Type=application/json" \
+    --body "{
+      \"properties\": {
+        \"runbook\": {
+          \"name\": \"$RUNBOOK_NAME\"
+        },
+        \"schedule\": {
+          \"name\": \"$SCHEDULE_NAME\"
+        },
+        \"parameters\": {
+          \"kvName\": \"$KEYVAULT_NAME\",
+          \"storageAccount\": \"$STORAGE_ACCOUNT\",
+          \"containerName\": \"$CONTAINER_NAME\",
+          \"subscriptionId\": \"$SUBSCRIPTION_ID\"
+        }
+      }
+    }"
 }
 
 verify_schedule() {
