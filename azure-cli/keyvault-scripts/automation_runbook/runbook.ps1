@@ -111,23 +111,60 @@ try {
         -StorageAccountName $storageAccount `
         -UseConnectedAccount
 
-    Get-ChildItem $tempPath | ForEach-Object {
+    $uploadedBlobs = @()
 
-        $blobName = "$kvName/$timestamp/$($_.Name)"
+    foreach ($file in Get-ChildItem $tempPath) {
+
+        $blobName = "$kvName/$timestamp/$($file.Name)"
+        $blobUrl  = "https://$storageAccount.blob.core.windows.net/$containerName/$blobName"
+
         Write-Output "  - Uploading: $blobName"
+        Write-Output "    URL: $blobUrl"
 
         Set-AzStorageBlobContent `
-            -File $_.FullName `
+            -File $file.FullName `
             -Container $containerName `
             -Blob $blobName `
             -Context $ctx `
             -Force | Out-Null
+
+        $uploadedBlobs += $blobName
     }
 }
 catch {
     Write-Error "❌ Error uploading to storage: $_"
     throw
 }
+
+# ================================
+# VERIFY UPLOAD
+# ================================
+Write-Output "🔍 Verifying uploaded blobs in storage..."
+
+try {
+    $prefix = "$kvName/$timestamp/"
+
+    $blobs = Get-AzStorageBlob `
+        -Container $containerName `
+        -Context $ctx `
+        -Prefix $prefix
+
+    if ($blobs.Count -eq 0) {
+        throw "❌ No blobs found in storage under prefix: $prefix"
+    }
+
+    Write-Output "✅ Found $($blobs.Count) blobs in storage:"
+
+    foreach ($b in $blobs) {
+        $url = "https://$storageAccount.blob.core.windows.net/$containerName/$($b.Name)"
+        Write-Output "  - $url"
+    }
+}
+catch {
+    Write-Error "❌ Verification failed: $_"
+    throw
+}
+
 
 # ================================
 # CLEANUP
